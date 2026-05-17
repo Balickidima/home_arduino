@@ -1,0 +1,42 @@
+#include <Arduino.h>
+
+#define BUTTON_PIN A1
+#define LED_PIN A2
+
+bool led_state = false;
+bool last_button_state = HIGH;
+
+void setup() {
+    pinMode(BUTTON_PIN, INPUT_PULLUP);
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, LOW);
+
+    Serial.begin(115200);
+}
+
+void loop() {
+    bool button_state = digitalRead(BUTTON_PIN);
+    unsigned long current_time = micros();
+
+    // Выводим ВСЕ изменения состояния кнопки — виден дребезг
+    if (button_state != last_button_state) {
+        Serial.print(current_time);
+        Serial.print(",");
+        Serial.print(button_state == LOW ? 1 : 0);  // 1 = нажата
+        Serial.print(",");
+        Serial.println(led_state ? 1 : 0);
+
+        // Реагируем на КАЖДОЕ нажатие (без защиты от дребезга!)
+        if (button_state == LOW && last_button_state == HIGH) {
+            led_state = !led_state;
+            digitalWrite(LED_PIN, led_state ? HIGH : LOW);
+            Serial.print(current_time);
+            Serial.print(",");
+            Serial.print(22);  // маркер переключения LED
+            Serial.println(led_state ? 1 : 0);
+        }
+    }
+
+    last_button_state = button_state;
+    // delay убран — опрашиваем максимально быстро
+}
