@@ -1,0 +1,111 @@
+#include <Arduino.h>
+
+#define POT_PIN A3        // пин подключения потенциометра
+#define LED_PIN A2        // пин подключения светодиода
+
+#define ADC_MAX 1024      // максимальное значение АЦП для Arduino Nano (10 бит = 0-1023)
+#define SEGMENTS 10       // количество сегментов деления напряжения
+#define ADC_MIN_THRESHOLD 1   // порог отсечки шумов в начале (нестабильная зона)
+#define ADC_MAX_THRESHOLD 980 // верхняя граница для 10 сегмента (реальное макс. напряжение)
+
+int prev_stable_level = -1; // последнее стабильное значение уровня (0-10)
+unsigned long blink_time = 0; // время начала мигания
+bool is_blinking = false; // флаг активного мигания
+int target_level = 0;     // целевой уровень после перехода
+
+// Функция вычисления уровня с учётом нестабильных зон
+int calculate_level(int adc_value) {
+    // Зона 0: adc_value <= ADC_MIN_THRESHOLD - выключено
+    if (adc_value <= ADC_MIN_THRESHOLD) {
+        return 0;
+    }
+
+    // Зона 1-10: распределяем диапазон от порога до максимума
+    // Каждый сегмент = (ADC_MAX_THRESHOLD - ADC_MIN_THRESHOLD) / 10
+    int range = ADC_MAX_THRESHOLD - ADC_MIN_THRESHOLD;
+    int segment_size = range / SEGMENTS;
+
+    int adjusted_value = adc_value - ADC_MIN_THRESHOLD;
+    int level = adjusted_value / segment_size + 1;
+
+    // Ограничиваем уровень максимумом 10
+    if (level > SEGMENTS) {
+        level = SEGMENTS;
+    }
+
+    return level;
+}
+
+void setup() {
+    pinMode(POT_PIN, INPUT);
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, LOW);
+
+    Serial.begin(115200);
+
+    // Увеличиваем скорость АЦП
+    // Делитель 64 = 250 кГц (быстрее стандартных 125 кГц)
+    ADCSRA = (ADCSRA & 0xF8) | 0x06;
+}
+
+void loop() {
+    // Читаем аналоговое значение с потенциометра (0-1023)
+    int adc_value = analogRead(POT_PIN);
+
+    // Вычисляем уровень с учётом нестабильных зон
+    int level = calculate_level(adc_value);
+
+    unsigned long current_time = millis();
+
+    // Обработка мигания (одиночный импульс при переходе)
+    if (is_blinking) {
+        if (current_time - blink_time >= 150) {
+            // Мигание завершено (150 мс)
+            is_blinking = false;
+            
+            // После мигания устанавливаем светодиод по целевому уровню
+            if (target_level > 0) {
+                digitalWrite(LED_PIN, HIGH);
+            } else {
+                digitalWrite(LED_PIN, LOW);
+            }
+        } else if (current_time - blink_time >= 75) {
+            // Вторая фаза: выключаем светодиод (75-150 мс)
+            digitalWrite(LED_PIN, LOW);
+        }
+        // Первая фаза (0-75 мс): светодиод включён
+    }
+
+    // Детектирование перехода
+    if (!is_blinking && prev_stable_level >= 0) {
+        // Переход на другой уровень
+        if (level != prev_stable_level) {
+            target_level = level;
+            
+            // Запускаем одиночное мигание
+            is_blinking = true;
+            blink_time = current_time;
+            digitalWrite(LED_PIN, HIGH); // Первая фаза: включаем
+
+            prev_stable_level = level;
+
+            // Выводим текущее значение уровня в UART
+            Serial.print(current_time);
+            Serial.print(",LEVEL=");
+            Serial.println(level);
+        }
+    } else if (prev_stable_level < 0) {
+        // Инициализация первого значения
+        prev_stable_level = level;
+        target_level = level;
+
+        // Устанавливаем начальное состояние светодиода
+        if (level > 0) {
+            digitalWrite(LED_PIN, HIGH);
+        } else {
+            digitalWrite(LED_PIN, LOW);
+        }
+    }
+
+    delay(5); // минимальная задержка для стабильности чтения
+}
